@@ -1,93 +1,102 @@
 terraform {
+  required_version = ">= 1.4.0"
+
   required_providers {
-    libvirt = {
-      source  = "dmacvicar/libvirt"
-      version = "~> 0.9.0"
+    docker = {
+      source  = "kreuzwerker/docker"
+      version = "~> 3.0"
     }
   }
-  required_version = ">= 1.5.0"
 }
 
-provider "libvirt" {
-  uri = "qemu:///system"
+provider "docker" {}
+
+locals {
+  project_prefix = "${var.project_name}-${var.environment}"
 }
 
-# Сеть
-resource "libvirt_network" "default" {
-  name      = var.network_name
-  mode      = "nat"
-  addresses = ["192.168.122.0/24"]
+# --- Network ---
+resource "docker_network" "app" {
+  name = "${local.project_prefix}-net"
 }
 
-# Образ-диск для виртуалок (копирование из базового qcow2)
-resource "libvirt_volume" "base_image" {
-  name   = "ubuntu-base.qcow2"
-  pool   = "default"
-  source = var.base_image
+# --- Volume for DB ---
+resource "docker_volume" "db_data" {
+  name = "${local.project_prefix}-db-data"
 }
 
-# Диск для App VM (копия базового)
-resource "libvirt_volume" "app_disk" {
-  name           = "${var.app_vm_name}.qcow2"
-  pool           = "default"
-  base_volume_id = libvirt_volume.base_image.id
+# --- Build app image ---
+resource "docker_image" "app" {
+  name = "${local.project_prefix}-app:${var.app_image_tag}"
+
+  build {
+    context    = "${path.module}/app"
+    dockerfile = "${path.module}/app/Dockerfile"
+  }
+
+  keep_locally = true
 }
 
-# Диск для DB VM (копия базового)
-resource "libvirt_volume" "db_disk" {
-  name           = "${var.db_vm_name}.qcow2"
-  pool           = "default"
-  base_volume_id = libvirt_volume.base_image.id
+# --- Postgres image ---
+resource "docker_image" "postgres" {
+  name = "postgres:${var.db_version}"
 }
 
-# ВМ приложения
-resource "libvirt_domain" "app_vm" {
-  name   = var.app_vm_name
-  memory = 2048
-  vcpu   = 2
+# --- DB container ---
+resource "docker_container" "db" {
+  name  = "${local.project_prefix}-db"
+  image = docker_image.postgres.image_id
 
-  network_interface {
-    network_id = libvirt_network.default.id
+  env = [
+    "POSTGRES_DB=${var.db_name}",
+    "POSTGRES_USER=${var.db_username}",
+    "POSTGRES_PASSWORD=${var.db_password}",
+  ]
+
+  mounts {
+    target = "/var/lib/postgresql/data"
+    type   = "volume"
+    source = docker_volume.db_data.name
   }
 
-  disk {
-    volume_id = libvirt_volume.app_disk.id
+  networks_advanced {
+    name = docker_network.app.name
   }
 
-  console {
-    type        = "pty"
-    target_type = "serial"
-    target_port = "0"
+  ports {
+    internal = 5432
+    external = var.db_port
   }
-  graphics {
-    type        = "vnc"
-    listen_type = "address"
-    autoport    = true
-  }
+
+  restart = "unless-stopped"
 }
 
-# ВМ базы данных
-resource "libvirt_domain" "db_vm" {
-  name   = var.db_vm_name
-  memory = 2048
-  vcpu   = 2
+# --- App container ---
+resource "docker_container" "app" {
+  name  = "${local.project_prefix}-app"
+  image = docker_image.app.image_id
 
-  network_interface {
-    network_id = libvirt_network.default.id
+  env = [
+    "APP_PORT=${var.app_port}",
+    "PROJECT_NAME=${var.project_name}",
+    "ENVIRONMENT=${var.environment}",
+    "DB_HOST=${var.db_host_override != null ? var.db_host_override : docker_container.db.name}",
+    "DB_PORT=${var.db_port}",
+    "DB_NAME=${var.db_name}",
+    "DB_USER=${var.db_username}",
+    "DB_PASSWORD=${var.db_password}"
+  ]
+
+  networks_advanced {
+    name = docker_network.app.name
   }
 
-  disk {
-    volume_id = libvirt_volume.db_disk.id
+  ports {
+    internal = var.app_port
+    external = var.app_port
   }
 
-  console {
-    type        = "pty"
-    target_type = "serial"
-    target_port = "0"
-  }
-  graphics {
-    type        = "vnc"
-    listen_type = "address"
-    autoport    = true
-  }
+  restart = "unless-stopped"
+
+  depends_on = [docker_container.db]
 }

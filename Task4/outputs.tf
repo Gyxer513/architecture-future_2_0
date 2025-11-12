@@ -1,9 +1,15 @@
-output "app_vm_ip" {
-  description = "IP адрес сервера приложения"
-  value       = libvirt_domain.app_vm.network_interface[0].addresses
+output "app_container_name" {
+  value = docker_container.app.name
 }
 
-output "db_vm_ip" {
-  description = "IP адрес сервера базы данных"
-  value       = libvirt_domain.db_vm.network_interface[0].addresses
+output "app_container_ip" {
+  value = docker_container.app.network_data[0].ip_address
+}
+
+output "db_container_name" {
+  value = docker_container.db.name
+}
+
+output "db_container_ip" {
+  value = docker_container.db.network_data[0].ip_address
 }
