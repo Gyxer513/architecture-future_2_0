@@ -1,0 +1,60 @@
+@startuml
+title Будущее 2.0 — DFD ключевых потоков
+
+left to right direction
+skinparam rectangle BorderColor #2E86C1
+skinparam database  BorderColor #117A65
+skinparam queue     BorderColor #7D3C98
+skinparam cloud     BorderColor #5D6D7E
+
+cloud EHR as "EHR/HIS"
+cloud PACS as "PACS/VNA"
+cloud Bank as "Core Banking/Loans"
+cloud Partners as "Pharma/MedTech"
+cloud CRM as "CRM/MDM"
+cloud ERP as "ERP/GL"
+cloud Devices as "IoMT Devices"
+
+queue BUS as "Шина событий"
+
+rectangle INGEST as "P1 Ingest (CDC/Streams)"
+rectangle DLP as "P2 De‑ID / DLP"
+database PHI as "DS1 Мед. хранилище (PHI)"
+database BRONZE as "DS2 Bronze (сырые)"
+rectangle TRANS as "P3 Трансформации + DQ"
+database SILVER as "DS3 Silver (очищенные)"
+database GOLD as "DS4 Gold (витрины)"
+rectangle SEM as "P4 Семантика/Метрики"
+database FSTORE as "DS5 Feature Store"
+rectangle TRAIN as "P5 Обучение моделей"
+rectangle SERVE as "P6 Модель‑сервер (Inference)"
+rectangle BI as "P7 BI / Портал self‑service"
+
+EHR --> DLP : мед. данные
+PACS --> PHI : изображения (PHI)
+DLP --> PHI : PHI хранение
+DLP --> BRONZE : обезличенные/агрегаты
+
+Bank --> INGEST : CDC транзакций/счета/кредиты
+CRM --> INGEST : изменения клиента/KYC/consent
+ERP --> INGEST : бух. операции
+Partners --> INGEST : B2B события (заказы/остатки/сервис)
+Devices --> INGEST : телеметрия/события
+
+INGEST --> BUS : публикация событий
+BUS --> BRONZE : запись сырых данных
+
+BRONZE --> TRANS : очистка/нормализация/контракты\nкачество данных
+TRANS --> SILVER
+SILVER --> GOLD : темы: Финансы, Клиенты, Риски, Инвентарь
+
+PHI --> TRAIN : обучающие наборы (secure)
+TRAIN --> FSTORE : расчётные фичи (агрегированные)
+FSTORE --> SERVE : онлайн фичи
+SERVE --> Bank : антифрод/скоринг (реалтайм)
+SERVE --> EHR : подсказки врачу (decision support)
+
+GOLD --> SEM : KPI/метрики/RLS
+SEM --> BI : отчёты/дашборды
+GOLD --> BI : ad‑hoc запросы
+@enduml
